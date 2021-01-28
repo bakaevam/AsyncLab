@@ -1,13 +1,25 @@
 package ru.anfilek.asyncLab
 
+import android.annotation.SuppressLint
 import android.os.*
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import ru.anfilek.asyncLab.databinding.ActivityMainBinding
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
 
     private var handlerThread: MyHandlerThread? = null
     private lateinit var binding: ActivityMainBinding
+    private lateinit var myRunnable: MyRunnable
+    private lateinit var th: Thread
+    private lateinit var handlerGame: Handler
+
+    companion object {
+        const private val FIRST_WIN = 1
+        const private val SECOND_WIN = 2
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -20,13 +32,34 @@ class MainActivity : AppCompatActivity() {
         binding.btnAsync.setOnClickListener { startAsync() }
         binding.btnFreeze.setOnClickListener { freeze() }
 
+        handlerGame = Handler()
+
+        handlerGame = @SuppressLint("HandlerLeak")
+        object : Handler() {
+            @SuppressLint("HandlerLeak")
+            override fun handleMessage(msg: Message) {
+                when (msg.what) {
+                    FIRST_WIN -> {
+                        Log.v("WINNER", "FIRST")
+                        binding.tv.text = "The First thread has won !"
+                    }
+                    else -> {
+                        Log.v("WINNER", "SECOND")
+                        binding.tv.text = "The Second thread has won !"
+                    }
+                }
+            }
+        }
+
         testSharedResources()
     }
 
     private fun startHandlerThread() {
         handlerThread = MyHandlerThread()
         handlerThread?.start()
-        handlerThread?.post()
+        myRunnable = MyRunnable(handlerThread!!)
+        th = Thread(myRunnable)
+        th.start()
     }
 
     private fun stopHandlerThread() {
@@ -69,6 +102,62 @@ class MainActivity : AppCompatActivity() {
             Thread.sleep(3000)
             return "That's all"
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        th.stop()
+        handlerThread!!.quit()
+    }
+
+    fun testSharedResources() {
+        var i: AtomicInteger = AtomicInteger(0)
+        fun getRandomInt(): Int {
+            return (1..6).random()
+        }
+
+        var thread1 = Thread()
+        var thread2 = Thread()
+
+
+        thread1 = thread {
+            try {
+                while (i.toInt() <= 100) {
+                    i.getAndAdd(getRandomInt())
+                    Log.d("TAG", "thread1: $i")
+
+                    if (i.toInt() >= 100 && thread2.isAlive) {
+                        thread2.interrupt()
+                        (handlerGame as Handler).sendEmptyMessage(FIRST_WIN)
+                        Log.d("TAG", "thread result: $i")
+                        break
+                    }
+                }
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
+        }
+
+        thread2 = thread {
+            try {
+                while (i.toInt() <= 100) {
+                    i.getAndAdd(getRandomInt())
+                    Log.d("TAG", "thread2: $i")
+
+                    if (i.toInt() >= 100 && thread1.isAlive) {
+                        thread1.interrupt()
+                        (handlerGame as Handler).sendEmptyMessage(SECOND_WIN)
+                        Log.d("TAG", "thread result: $i")
+                        break
+                    }
+                }
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+            }
+        }
+
+        thread2.join()
+        thread1.join()
     }
 }
 
